@@ -1,0 +1,175 @@
+"""
+checks.py — UTM compliance check classes.
+Forensic-grade logging enabled.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Any, Dict
+
+from threat.cvss_service import get_cvss_for_check
+from remediation.remediation_engine import get_remediation
+from .commands import CommandCache, NMAP_TIMEOUT
+from .parser import (
+    parse_check_1_open_ports,
+    parse_check_2_management_ports,
+    parse_check_3_login_interface,
+    parse_check_4_observed_services,
+    parse_check_5_version_visibility,
+)
+
+
+@dataclass
+class NetworkCheckContext:
+    target_ip: str
+    cache: CommandCache
+    port: Optional[int] = None
+
+
+@dataclass
+class CheckResult:
+    check_id: str
+    check_name: str
+    tool_name: str
+    command_executed: str
+    raw_output: str
+    decision_logic: str
+    result: str  # "PASS" or "FAIL"
+    # Timing fields
+    execution_start:  Optional[Any] = None
+    execution_end:    Optional[Any] = None
+    execution_duration: float = 0.0
+    # Threat/Remediation
+    cvss_score: float = 0.0
+    severity: str = ""
+    cve_id: str = ""
+    remediation_text: str = ""
+    remediation_example: str = ""
+    remediation_reference: str = ""
+
+def format_forensic_output(meta: Dict[str, Any]) -> str:
+    """Format the metadata into a terminal-style banner at the top."""
+    return f"""=== EXECUTION INFO ===
+Command: {meta.get('command')}
+Start (UTC): {meta.get('start_time')}
+End   (UTC): {meta.get('end_time')}
+Duration: {meta.get('duration'):.2f} sec
+======================
+
+{meta.get('output')}"""
+
+
+class NetworkCheck:
+    check_id: str = ""
+    check_name: str = ""
+
+    def __init__(self, ctx: NetworkCheckContext) -> None:
+        self.ctx = ctx
+
+    def _make_result(self, tool_name: str, meta: Dict[str, Any], res: str, logic: str) -> CheckResult:
+        cvss_data = {}
+        remediation = {}
+        if res == "FAIL":
+            try:
+                numeric_id = int(self.check_id)
+                cvss_data = get_cvss_for_check(numeric_id, self.check_name)
+                
+                # Pass context for Dynamic AI Remediation if available
+                finding_context = {
+                    "check_name": self.check_name,
+                    "raw_output": format_forensic_output(meta),
+                    "summary": logic
+                }
+                remediation = get_remediation(numeric_id, finding_details=finding_context)
+            except: pass
+            
+        return CheckResult(
+            check_id=self.check_id,
+            check_name=self.check_name,
+            tool_name=tool_name,
+            command_executed=meta.get('command', 'N/A'),
+            raw_output=format_forensic_output(meta),
+            decision_logic=logic,
+            result=res,
+            execution_start=meta.get('start_time'),
+            execution_end=meta.get('end_time'),
+            execution_duration=meta.get('duration', 0.0),
+            cvss_score=cvss_data.get('cvss_score', 0.0),
+            severity=cvss_data.get('severity', ''),
+            cve_id=cvss_data.get('cve_id', ''),
+            remediation_text=remediation.get('fix', ''),
+            remediation_example=remediation.get('example', ''),
+            remediation_reference=remediation.get('reference', ''),
+        )
+
+    def run(self) -> CheckResult:
+        raise NotImplementedError
+
+
+class Check01OpenPorts(NetworkCheck):
+    check_id = "301"
+    check_name = "List open ports on IP address"
+
+    def run(self) -> CheckResult:
+        # Include custom port if provided
+        port_args = ["-p", str(self.ctx.port)] if self.ctx.port else []
+        args = ["nmap", "-Pn", "-sV", "-O"] + port_args + [self.ctx.target_ip]
+        meta = self.ctx.cache.get_or_run(args, timeout=NMAP_TIMEOUT)
+        result, logic = parse_check_1_open_ports(meta['output'])
+        return self._make_result("nmap", meta, result, logic)
+
+
+class Check02ManagementPorts(NetworkCheck):
+    check_id = "302"
+    check_name = "Management port should not be accessible"
+
+    def run(self) -> CheckResult:
+        args = ["nmap", "-Pn", "-p", "22,80,443", self.ctx.target_ip]
+        meta = self.ctx.cache.get_or_run(args, timeout=NMAP_TIMEOUT)
+        result, logic = parse_check_2_management_ports(meta['output'])
+        return self._make_result("nmap", meta, result, logic)
+
+
+class Check03LoginInterface(NetworkCheck):
+    check_id = "303"
+    check_name = "Login interface shall not be visible on internet"
+
+    def run(self) -> CheckResult:
+        # Reuse the same scan as Check02 (cached)
+        args = ["nmap", "-Pn", "-p", "22,80,443", self.ctx.target_ip]
+        meta = self.ctx.cache.get_or_run(args, timeout=NMAP_TIMEOUT)
+        result, logic = parse_check_3_login_interface(meta['output'])
+        return self._make_result("nmap", meta, result, logic)
+
+
+class Check04ObservedServices(NetworkCheck):
+    check_id = "304"
+    check_name = "List observed services operational"
+
+    def run(self) -> CheckResult:
+        args = ["nmap", "-Pn", "-p", "21,22,25,80,443", self.ctx.target_ip]
+        meta = self.ctx.cache.get_or_run(args, timeout=NMAP_TIMEOUT)
+        result, logic = parse_check_4_observed_services(meta['output'])
+        return self._make_result("nmap", meta, result, logic)
+
+
+class Check05VersionVisibility(NetworkCheck):
+    check_id = "305"
+    check_name = "Service version should not be visible"
+
+    def run(self) -> CheckResult:
+        args = ["nmap", "-Pn", "-sV", self.ctx.target_ip]
+        meta = self.ctx.cache.get_or_run(args, timeout=NMAP_TIMEOUT)
+        result, logic = parse_check_5_version_visibility(meta['output'])
+        return self._make_result("nmap", meta, result, logic)
+
+
+ALL_CHECKS: list[type[NetworkCheck]] = [
+    Check01OpenPorts,
+    Check02ManagementPorts,
+    Check03LoginInterface,
+    Check04ObservedServices,
+    Check05VersionVisibility,
+]
+TOTAL_CHECKS = len(ALL_CHECKS)

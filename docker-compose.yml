@@ -1,0 +1,181 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Web Security Compliance Platform — Docker Compose
+#
+#  Services:  postgres | redis | backend | celery_worker | flower | frontend
+#
+#  Usage:
+#    cp .env.example .env          # fill in secrets
+#    docker compose up --build     # first run (builds images + creates DB)
+#    docker compose up             # subsequent runs (reuses built images)
+#    docker compose down           # stop containers (data volume preserved)
+#    docker compose down -v        # stop + DELETE all data
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL 15 ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: compliance_postgres
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Kolkata
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    networks:
+      - compliance_net
+    healthcheck:
+      test:         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval:     10s
+      timeout:      5s
+      retries:      5
+      start_period: 15s
+
+  # ── Redis (Message Broker) ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: compliance_redis
+    restart: unless-stopped
+    networks:
+      - compliance_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend (API only) ───────────────────────────────────────────────
+  backend:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: compliance_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Kolkata
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL:     "redis://redis:6379/0"
+      PYTHONPATH:    "/app:."
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - compliance_net
+    healthcheck:
+      test:         ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval:     30s
+      timeout:      10s
+      retries:      3
+      start_period: 20s
+
+  # ── Celery Worker (executes scans) ───────────────────────────────────────────
+  celery_worker:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: compliance_celery_worker
+    restart: unless-stopped
+    command: celery -A celery_app.celery worker --loglevel=info
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      TZ: Asia/Kolkata
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL:     "redis://redis:6379/0"
+      PYTHONPATH:    "/app:."
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - compliance_net
+
+  # ── Celery Beat (schedules scans) ────────────────────────────────────────────
+  celery_beat:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: compliance_celery_beat
+    restart: unless-stopped
+    command: celery -A celery_app.celery beat --loglevel=info -s /tmp/celerybeat-schedule
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      TZ: Asia/Kolkata
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL:     "redis://redis:6379/0"
+      PYTHONPATH:    "/app:."
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - compliance_net
+
+  # ── Flower (Celery Monitoring UI) ────────────────────────────────────────────
+  flower:
+    image: mher/flower:2.0
+    container_name: compliance_flower
+    restart: unless-stopped
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+    #environment:
+      #- FLOWER_BROKER=redis://redis:6379/0
+      #- FLOWER_PORT=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - compliance_net
+
+  # ── React / nginx Frontend ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context:    ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+    container_name: compliance_frontend
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Kolkata
+    ports:
+      - "3000:80"
+      - "443:443"
+    volumes:
+      - ./frontend/certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+    networks:
+      - compliance_net
+    healthcheck:
+      test:         ["CMD", "curl", "-k", "-f", "https://localhost/"]
+      interval:     30s
+      timeout:      5s
+      retries:      3
+      start_period: 10s
+
+# ── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  compliance_net:
+    driver: bridge

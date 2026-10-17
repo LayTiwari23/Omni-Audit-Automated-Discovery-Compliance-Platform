@@ -1,0 +1,77 @@
+# ==========================================
+# Environment / Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ==========================================
+# OS / Editor
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+codes.code-workspace
+
+# ==========================================
+# Python (backend)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+
+# ==========================================
+# Node / React / Vite (frontend)
+# ==========================================
+node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+.cache/
+coverage/
+*.local
+
+# ==========================================
+# Backup / temporary files
+# ==========================================
+*.bak
+*.bak[0-9]*
+*.bak[0-9][0-9]*
+*.tmp
+*.orig
+*.old
+*.save
+*~
+
+# ==========================================
+# Runtime / generated data
+# ==========================================
+scan_reports/
+postgres/data/
+postgres/pgdata/
+pgdata/
+*.sql.gz
+*.dump
+
+# ==========================================
+# TLS certs
+# ==========================================
+frontend/certs/

@@ -1,0 +1,61 @@
+# =============================================================================
+#  Web Security Compliance Platform — Backend Dependencies
+#  Python 3.11+
+#
+#  Pin strategy:
+#    Major.Minor pinned (>=X.Y, <X+1) for security-sensitive packages.
+#    Exact pin (==) for packages where API stability is critical.
+#    All versions verified compatible with Python 3.11 on Linux/Docker.
+#
+#  Install:  pip install -r requirements.txt
+# =============================================================================
+
+
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.6                  # ASGI framework — core of the backend
+uvicorn[standard]==0.32.1         # ASGI server (includes websockets, httptools)
+python-multipart==0.0.20          # Required for FastAPI form-encoded login body
+pydantic[email]
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36                # ORM — raw text() queries only (no model classes)
+psycopg2-binary==2.9.10           # PostgreSQL driver — binary wheel, no pg_config needed
+
+
+# ── Authentication ────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0  # JWT encode/decode (HS256)
+passlib[bcrypt]==1.7.4            # Password hashing — bcrypt backend
+
+
+# ── HTTP / Network Probing ────────────────────────────────────────────────────
+requests==2.32.3                  # HTTP client — used by python engine checks
+aiohttp==3.11.10                  # Async HTTP client for CVSS fetching
+urllib3==2.2.3                    # Pinned explicitly — requests dependency
+
+
+# ── TLS / SSL Inspection ──────────────────────────────────────────────────────
+pyOpenSSL==24.3.0                 # SSL socket inspection (Checks 16, 17, 26)
+cryptography==43.0.3              # Underlying crypto primitives — also used by jose
+                                  # NOTE: cryptography version must be compatible
+                                  # with both pyOpenSSL AND python-jose
+
+
+# ── DNS ───────────────────────────────────────────────────────────────────────
+dnspython==2.7.0                  # DNS CAA record lookup (Check 28)
+
+
+# ── Report Generation ─────────────────────────────────────────────────────────
+reportlab==4.2.5                  # PDF generation — summary and detailed exports
+openpyxl==3.1.5                   # Excel (XLSX) export
+
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1              # Load .env file in development (non-Docker)
+certifi==2024.12.14               # Up-to-date CA bundle for requests/SSL
+idna==3.10                        # Internationalised domain names — requests dep
+charset-normalizer==3.4.0         # Character encoding detection — requests dep
+pyjwt
+celery
+redis
+croniter
+nest-asyncio>=1.5.0
