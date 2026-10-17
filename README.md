@@ -1,4 +1,4 @@
-# Web Security Compliance Platform
+# Security Compliance Platform
 
 An automated platform for security scanning, service discovery, and compliance reporting. This platform provides a comprehensive suite of tools to identify security vulnerabilities across various protocols (Web, DNS, Email, SSH, FTP, etc.) and generate detailed remediation reports.
 
